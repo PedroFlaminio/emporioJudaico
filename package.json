@@ -1,0 +1,19 @@
+{
+  "name": "emporio-judaico-operacao",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "bun --filter '*' dev",
+    "dev:api": "bun --cwd apps/api dev",
+    "dev:web": "bun --cwd apps/web dev",
+    "build": "bun --filter '*' build",
+    "typecheck": "bun --filter '*' typecheck",
+    "test": "bun --cwd apps/api test",
+    "db:generate": "bun --cwd apps/api db:generate",
+    "db:migrate": "bun --cwd apps/api db:migrate",
+    "db:seed": "bun --cwd apps/api db:seed"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}
