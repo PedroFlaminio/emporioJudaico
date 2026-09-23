@@ -90,6 +90,20 @@ const orderSchema = z.object({
   trackingCode: optionalText,
 });
 
+const orderUpdateSchema = orderSchema.omit({ payment: true, items: true }).extend({
+  items: z.array(z.object({
+    id: id.optional(),
+    productId: id,
+    quantity: z.coerce.number().positive(),
+    unitPrice: z.coerce.number().nonnegative(),
+    notes: optionalText,
+  })).min(1),
+});
+
+// O pedido pode ser alterado em qualquer etapa anterior à expedição.
+const editableStatuses: OrderStatus[] = ["recebido", "pagamento_pendente", "pagamento_confirmado", "em_producao", "preparacao", "pronto"];
+const orderEditRoles: UserRole[] = ["atendimento", "gestor"];
+
 const flow: Record<OrderStatus, OrderStatus[]> = {
   recebido: ["pagamento_pendente", "pagamento_confirmado", "em_producao", "cancelado"],
   pagamento_pendente: ["pagamento_confirmado", "cancelado"],
@@ -154,6 +168,44 @@ const orderListSelection = {
   customerName: customers.name,
   customerPhone: customers.phone,
 };
+
+const shipmentSelection = {
+  id: shipments.id,
+  type: shipments.type,
+  address: shipments.address,
+  deliveryWindow: shipments.deliveryWindow,
+  carrier: shipments.carrier,
+  driver: shipments.driver,
+  trackingCode: shipments.trackingCode,
+  departedAt: shipments.departedAt,
+  deliveredAt: shipments.deliveredAt,
+  failedReason: shipments.failedReason,
+  orderId: orders.id,
+  orderNumber: orders.number,
+  orderStatus: orders.status,
+  promisedDate: orders.promisedDate,
+  customerName: customers.name,
+  customerPhone: customers.phone,
+};
+
+const deliveredSortColumns = {
+  deliveredAt: shipments.deliveredAt,
+  promisedDate: orders.promisedDate,
+  orderNumber: orders.number,
+  customerName: customers.name,
+};
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const deliveredQuerySchema = z.object({
+  search: z.string().trim().optional(),
+  type: z.enum(["entrega", "retirada", "transportadora"]).optional().or(z.literal("").transform(() => undefined)),
+  from: isoDate.optional().or(z.literal("").transform(() => undefined)),
+  to: isoDate.optional().or(z.literal("").transform(() => undefined)),
+  sort: z.enum(["deliveredAt", "promisedDate", "orderNumber", "customerName"]).default("deliveredAt"),
+  dir: z.enum(["asc", "desc"]).default("desc"),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
 
 export const apiRoutes = new Elysia({ prefix: "/api" })
   .get("/health", () => ({ status: "ok", service: "emporio-api", timestamp: new Date().toISOString() }))
@@ -384,7 +436,73 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
       db.select({ id: occurrences.id, type: occurrences.type, description: occurrences.description, status: occurrences.status, solution: occurrences.solution, createdAt: occurrences.createdAt, resolvedAt: occurrences.resolvedAt, createdByName: users.name }).from(occurrences).innerJoin(users, eq(occurrences.createdBy, users.id)).where(eq(occurrences.orderId, params.id)).orderBy(desc(occurrences.createdAt)),
       db.select({ id: orderHistory.id, fromStatus: orderHistory.fromStatus, toStatus: orderHistory.toStatus, notes: orderHistory.notes, createdAt: orderHistory.createdAt, userName: users.name }).from(orderHistory).innerJoin(users, eq(orderHistory.changedBy, users.id)).where(eq(orderHistory.orderId, params.id)).orderBy(desc(orderHistory.createdAt)),
     ]);
-    return { ...order, items, payments: paymentRows, production: production[0] ?? null, shipping: shipping[0] ?? null, occurrences: issueRows, history, allowedTransitions: allowedTransitionsFor(user, order.status) };
+    return {
+      ...order, items, payments: paymentRows, production: production[0] ?? null, shipping: shipping[0] ?? null, occurrences: issueRows, history,
+      allowedTransitions: allowedTransitionsFor(user, order.status),
+      canEdit: editableStatuses.includes(order.status) && can(user, orderEditRoles),
+    };
+  })
+  .put("/orders/:id", async ({ headers, params, body, set }) => {
+    const user = await requireUser(headers.authorization, set);
+    if (!user || !can(user, orderEditRoles)) return forbidden(set, user);
+    try {
+      const input = parseBody(orderUpdateSchema, body);
+      const [current] = await db.select().from(orders).where(eq(orders.id, params.id)).limit(1);
+      if (!current) { set.status = 404; return { message: "Pedido não encontrado." }; }
+      if (!editableStatuses.includes(current.status)) {
+        set.status = 409;
+        return { message: `O pedido está em ${orderStatusLabels[current.status]} e não pode mais ser alterado. Alterações são permitidas apenas até a etapa Pronto.` };
+      }
+      const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+      const total = Math.max(0, subtotal - input.discount);
+      const result = await db.transaction(async (tx) => {
+        const [order] = await tx.update(orders).set({
+          customerId: input.customerId, promisedDate: input.promisedDate || null, priority: input.priority,
+          deliveryType: input.deliveryType, discount: input.discount.toFixed(2), subtotal: subtotal.toFixed(2),
+          total: total.toFixed(2), notes: input.notes, updatedAt: new Date(),
+        }).where(eq(orders.id, params.id)).returning();
+
+        // Itens mantidos preservam a conferência, a menos que produto ou quantidade tenham mudado.
+        const existing = await tx.select().from(orderItems).where(eq(orderItems.orderId, params.id));
+        const keptIds = new Set(input.items.flatMap((item) => item.id ? [item.id] : []));
+        const removedIds = existing.filter((item) => !keptIds.has(item.id)).map((item) => item.id);
+        if (removedIds.length) await tx.delete(orderItems).where(inArray(orderItems.id, removedIds));
+        for (const item of input.items) {
+          const values = {
+            productId: item.productId, quantity: item.quantity.toFixed(3), unitPrice: item.unitPrice.toFixed(2),
+            total: (item.quantity * item.unitPrice).toFixed(2), notes: item.notes,
+          };
+          const previous = item.id ? existing.find((row) => row.id === item.id) : undefined;
+          if (!previous) { await tx.insert(orderItems).values({ orderId: params.id, ...values }); continue; }
+          const changed = previous.productId !== values.productId || Number(previous.quantity) !== item.quantity;
+          await tx.update(orderItems).set({ ...values, ...(changed ? { checkStatus: "pendente" as const, checkedBy: null, checkedAt: null } : {}) }).where(eq(orderItems.id, previous.id));
+        }
+
+        await tx.update(shipments).set({
+          type: input.deliveryType, address: input.deliveryType === "retirada" ? {} : input.shippingAddress,
+          deliveryWindow: input.deliveryWindow, carrier: input.carrier, driver: input.driver,
+          trackingCode: input.trackingCode, updatedAt: new Date(),
+        }).where(eq(shipments.orderId, params.id));
+
+        // Mantém a cobrança em aberto alinhada ao novo total do pedido.
+        const [payment] = await tx.select().from(payments)
+          .where(and(eq(payments.orderId, params.id), inArray(payments.status, ["pendente", "parcial", "pago", "vencido"])))
+          .orderBy(desc(payments.createdAt)).limit(1);
+        if (payment && Number(payment.amount) !== total) {
+          const received = Number(payment.receivedAmount);
+          const status = received <= 0 ? payment.status : received >= total ? "pago" : "parcial";
+          await tx.update(payments).set({
+            amount: total.toFixed(2), status,
+            paidAt: status === "pago" ? payment.paidAt ?? new Date() : null, updatedAt: new Date(),
+          }).where(eq(payments.id, payment.id));
+        }
+
+        const totalNote = Number(current.total) !== total ? ` (total ${Number(current.total).toFixed(2)} → ${total.toFixed(2)})` : "";
+        await tx.insert(orderHistory).values({ orderId: params.id, fromStatus: current.status, toStatus: current.status, notes: `Pedido alterado${totalNote}`, changedBy: user.id });
+        return order;
+      });
+      return result;
+    } catch (error) { return apiError(error, set); }
   })
   .post("/orders/:id/transition", async ({ headers, params, body, set }) => {
     const user = await requireUser(headers.authorization, set);
@@ -484,9 +602,36 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
   .get("/shipping", async ({ headers, set }) => {
     const user = await requireUser(headers.authorization, set);
     if (!user || !can(user, ["expedicao", "gestor"])) return forbidden(set, user);
-    return db.select({ id: shipments.id, type: shipments.type, address: shipments.address, deliveryWindow: shipments.deliveryWindow, carrier: shipments.carrier, driver: shipments.driver, trackingCode: shipments.trackingCode, departedAt: shipments.departedAt, deliveredAt: shipments.deliveredAt, failedReason: shipments.failedReason, orderId: orders.id, orderNumber: orders.number, orderStatus: orders.status, promisedDate: orders.promisedDate, customerName: customers.name, customerPhone: customers.phone })
+    return db.select(shipmentSelection)
       .from(shipments).innerJoin(orders, eq(shipments.orderId, orders.id)).innerJoin(customers, eq(orders.customerId, customers.id))
-      .where(inArray(orders.status, ["pronto", "expedicao", "entregue"])).orderBy(asc(orders.promisedDate));
+      .where(inArray(orders.status, ["pronto", "expedicao"])).orderBy(asc(orders.promisedDate));
+  })
+  .get("/shipping/delivered", async ({ headers, query, set }) => {
+    const user = await requireUser(headers.authorization, set);
+    if (!user || !can(user, ["expedicao", "gestor"])) return forbidden(set, user);
+    try {
+      const input = parseBody(deliveredQuerySchema, query);
+      const filters = [eq(orders.status, "entregue" as OrderStatus)];
+      if (input.search) filters.push(or(ilike(orders.number, `%${input.search}%`), ilike(customers.name, `%${input.search}%`))!);
+      if (input.type) filters.push(eq(shipments.type, input.type));
+      // Datas do filtro são dias no fuso da operação, não em UTC.
+      if (input.from) filters.push(sql`(${shipments.deliveredAt} at time zone ${config.timeZone})::date >= ${input.from}::date`);
+      if (input.to) filters.push(sql`(${shipments.deliveredAt} at time zone ${config.timeZone})::date <= ${input.to}::date`);
+      const where = and(...filters);
+      const direction = input.dir === "asc" ? asc : desc;
+      const sortColumn = deliveredSortColumns[input.sort];
+      const [rows, [count]] = await Promise.all([
+        db.select(shipmentSelection)
+          .from(shipments).innerJoin(orders, eq(shipments.orderId, orders.id)).innerJoin(customers, eq(orders.customerId, customers.id))
+          .where(where)
+          .orderBy(input.dir === "asc" ? sql`${sortColumn} asc nulls first` : sql`${sortColumn} desc nulls last`, direction(orders.number))
+          .limit(input.pageSize).offset((input.page - 1) * input.pageSize),
+        db.select({ total: sql<number>`count(*)::int` })
+          .from(shipments).innerJoin(orders, eq(shipments.orderId, orders.id)).innerJoin(customers, eq(orders.customerId, customers.id))
+          .where(where),
+      ]);
+      return { rows, total: count?.total ?? 0, page: input.page, pageSize: input.pageSize };
+    } catch (error) { return apiError(error, set); }
   })
   .patch("/shipping/:id", async ({ headers, params, body, set }) => {
     const user = await requireUser(headers.authorization, set);

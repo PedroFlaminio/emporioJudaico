@@ -5,6 +5,7 @@ export const config = {
   webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:5173",
   isProduction: process.env.NODE_ENV === "production",
   sessionDays: 7,
+  timeZone: process.env.APP_TIME_ZONE ?? "America/Sao_Paulo",
 };
 
 export const corsOrigins: Array<string | RegExp> = [

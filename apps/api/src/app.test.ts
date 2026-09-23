@@ -98,6 +98,35 @@ describe("fluxo operacional da API", () => {
     expect(allowed.status).toBe(200);
   });
 
+  it("permite alterar o pedido antes da expedição", async () => {
+    const detail = await (await call(`/api/orders/${orderId}`)).json() as { status: string; canEdit: boolean; items: Array<{ id: string; productId: string; unitPrice: string; checkStatus: string }> };
+    expect(detail.status).toBe("preparacao");
+    expect(detail.canEdit).toBe(true);
+    const item = detail.items[0]!;
+    expect((await call(`/api/order-items/${item.id}/check`, { method: "PATCH", body: JSON.stringify({ status: "conferido" }) })).status).toBe(200);
+
+    const producaoToken = await login("producao@emporio.local");
+    const denied = await callAs(producaoToken, `/api/orders/${orderId}`, { method: "PUT", body: JSON.stringify({ customerId, deliveryType: "retirada", items: [{ id: item.id, productId: item.productId, quantity: 1, unitPrice: 1 }] }) });
+    expect(denied.status).toBe(403);
+
+    const unitPrice = Number(item.unitPrice) + 50;
+    const response = await call(`/api/orders/${orderId}`, { method: "PUT", body: JSON.stringify({
+      customerId, priority: "urgente", deliveryType: "entrega", discount: 5, notes: "Cliente pediu mais uma unidade",
+      items: [{ id: item.id, productId: item.productId, quantity: 2, unitPrice }],
+      shippingAddress: { street: "Rua de Teste", number: "123", city: "Jacareí", state: "SP" }, deliveryWindow: "8h às 12h",
+    }) });
+    expect(response.status).toBe(200);
+    const updated = await (await call(`/api/orders/${orderId}`)).json() as { priority: string; total: string; items: Array<{ checkStatus: string }>; payments: Array<{ amount: string; status: string }>; shipping: { type: string; deliveryWindow: string }; history: Array<{ notes: string }> };
+    const expectedTotal = 2 * unitPrice - 5;
+    expect(updated.priority).toBe("urgente");
+    expect(Number(updated.total)).toBeCloseTo(expectedTotal, 2);
+    expect(updated.items[0]!.checkStatus).toBe("pendente");
+    expect(Number(updated.payments[0]!.amount)).toBeCloseTo(expectedTotal, 2);
+    expect(updated.payments[0]!.status).toBe("parcial");
+    expect(updated.shipping).toMatchObject({ type: "entrega", deliveryWindow: "8h às 12h" });
+    expect(updated.history[0]!.notes).toStartWith("Pedido alterado");
+  });
+
   it("atualiza pagamento parcial e dados de expedição", async () => {
     const financeiroToken = await login("financeiro@emporio.local");
     const paymentResponse = await callAs(financeiroToken, `/api/payments/${paymentId}`, { method: "PATCH", body: JSON.stringify({ status: "parcial", receivedAmount: 20, proofReference: "PIX-ATUALIZADO", notes: "Segunda parcela recebida" }) });
@@ -112,6 +141,29 @@ describe("fluxo operacional da API", () => {
     const shippingResponse = await callAs(expedicaoToken, `/api/shipping/${shippingId}`, { method: "PATCH", body: JSON.stringify({ driver: "Novo entregador", trackingCode: "RASTREIO-123", failedReason: "Destinatário ausente", address: { street: "Rua Atualizada", number: "456", city: "Jacareí", state: "SP" } }) });
     expect(shippingResponse.status).toBe(200);
     expect((await callAs(expedicaoToken, `/api/orders/${orderId}/transition`, { method: "POST", body: JSON.stringify({ status: "expedicao" }) })).status).toBe(200);
+
+    const detail = await (await call(`/api/orders/${orderId}`)).json() as { canEdit: boolean; items: Array<{ id: string; productId: string }> };
+    expect(detail.canEdit).toBe(false);
+    const blocked = await call(`/api/orders/${orderId}`, { method: "PUT", body: JSON.stringify({ customerId, deliveryType: "retirada", items: [{ id: detail.items[0]!.id, productId: detail.items[0]!.productId, quantity: 1, unitPrice: 1 }] }) });
+    expect(blocked.status).toBe(409);
+
+    const beforeDelivery = Date.now();
+    expect((await callAs(expedicaoToken, `/api/orders/${orderId}/transition`, { method: "POST", body: JSON.stringify({ status: "entregue" }) })).status).toBe(200);
+    const board = await (await callAs(expedicaoToken, "/api/shipping")).json() as Array<{ orderId: string }>;
+    expect(board.some((row) => row.orderId === orderId)).toBe(false);
+    const delivered = await (await callAs(expedicaoToken, "/api/shipping/delivered?pageSize=5")).json() as { total: number; rows: Array<{ orderId: string; orderNumber: string; deliveredAt: string }> };
+    expect(delivered.rows.length).toBeLessThanOrEqual(5);
+    expect(delivered.rows[0]).toMatchObject({ orderId });
+    expect(new Date(delivered.rows[0]!.deliveredAt).getTime()).toBeGreaterThanOrEqual(beforeDelivery - 1000);
+    const sorted = delivered.rows.map((row) => new Date(row.deliveredAt).getTime());
+    expect(sorted).toEqual([...sorted].sort((a, b) => b - a));
+    const byNumber = (type: string) => `/api/shipping/delivered?search=${delivered.rows[0]!.orderNumber}&type=${type}`;
+    expect((await (await callAs(expedicaoToken, byNumber("entrega"))).json() as { total: number }).total).toBe(1);
+    expect((await (await callAs(expedicaoToken, byNumber("retirada"))).json() as { total: number }).total).toBe(0);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+    expect((await (await callAs(expedicaoToken, `${byNumber("entrega")}&from=${today}&to=${today}&sort=customerName&dir=asc`)).json() as { total: number }).total).toBe(1);
+    expect((await (await callAs(expedicaoToken, `${byNumber("entrega")}&to=2000-01-01`)).json() as { total: number }).total).toBe(0);
+    expect((await callAs(expedicaoToken, "/api/shipping/delivered?sort=invalido")).status).toBe(422);
   });
 
   it("edita e exclui cadastros, bloqueando exclusão de registros vinculados", async () => {

@@ -43,6 +43,12 @@ export function Field({ label, children, hint }: { label: string; children: Reac
   return <label className="field"><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>;
 }
 
+// Entrada financeira: os dígitos preenchem a partir dos centavos (ex.: 1, 12, 123 → 0,01 / 0,12 / 1,23).
+export function MoneyInput({ value, onChange, disabled, required }: { value: number; onChange: (value: number) => void; disabled?: boolean; required?: boolean }) {
+  const text = value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return <div className="money-input"><span>R$</span><input inputMode="numeric" value={text} disabled={disabled} required={required} onChange={(e) => onChange(Number(e.target.value.replace(/\D/g, "").slice(-12) || 0) / 100)} /></div>;
+}
+
 export function ErrorBanner({ message }: { message: string }) {
   return <div className="error-banner" role="alert">{message}</div>;
 }

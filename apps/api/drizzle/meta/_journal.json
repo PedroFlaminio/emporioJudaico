@@ -15,6 +15,13 @@
       "when": 1788521065284,
       "tag": "0001_sticky_the_executioner",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790198761634,
+      "tag": "0002_backfill_delivered_at",
+      "breakpoints": true
     }
   ]
 }

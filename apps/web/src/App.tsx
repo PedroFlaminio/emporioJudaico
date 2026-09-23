@@ -10,6 +10,7 @@ import { ProductionPage } from "./pages/ProductionPage";
 import { PreparationPage } from "./pages/PreparationPage";
 import { FinancePage } from "./pages/FinancePage";
 import { ShippingPage } from "./pages/ShippingPage";
+import { DeliveredShipmentsPage } from "./pages/DeliveredShipmentsPage";
 import { RegistrationsPage } from "./pages/RegistrationsPage";
 
 function ProtectedRoutes() {
@@ -31,6 +32,7 @@ export function App() {
       <Route path="preparacao" element={<PreparationPage />} />
       <Route path="financeiro" element={<FinancePage />} />
       <Route path="expedicao" element={<ShippingPage />} />
+      <Route path="expedicao/concluidas" element={<DeliveredShipmentsPage />} />
       <Route path="cadastros" element={<RegistrationsPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />

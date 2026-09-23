@@ -12,6 +12,8 @@ export type Payment = { id: string; amount: string; receivedAmount: string; meth
 export type ProductionJob = { id: string; status: "aguardando" | "em_andamento" | "pausado" | "concluido"; startedAt: string | null; completedAt: string | null; notes: string | null; assigneeId: string | null; assigneeName: string | null; orderId: string; orderNumber: string; orderStatus: OrderStatus; priority: Priority; promisedDate: string | null; customerName: string };
 export type Shipment = { id: string; type: string; address: Address; deliveryWindow: string | null; carrier: string | null; driver: string | null; trackingCode: string | null; departedAt: string | null; deliveredAt: string | null; failedReason: string | null; orderId: string; orderNumber: string; orderStatus: OrderStatus; promisedDate: string | null; customerName: string; customerPhone: string | null };
 
+export type Paginated<T> = { rows: T[]; total: number; page: number; pageSize: number };
+
 export const statusLabel: Record<OrderStatus, string> = {
   recebido: "Recebido", pagamento_pendente: "Pagamento pendente", pagamento_confirmado: "Pagamento confirmado",
   em_producao: "Em produção", preparacao: "Preparação", pronto: "Pronto", expedicao: "Expedição",
@@ -19,3 +21,4 @@ export const statusLabel: Record<OrderStatus, string> = {
 };
 export const priorityLabel: Record<Priority, string> = { baixa: "Baixa", normal: "Normal", alta: "Alta", urgente: "Urgente" };
 export const roleLabel: Record<Role, string> = { atendimento: "Atendimento", producao: "Produção", expedicao: "Expedição", financeiro: "Financeiro", gestor: "Gestor", administrador: "Administrador" };
+export const deliveryTypeLabel: Record<Order["deliveryType"], string> = { entrega: "Entrega", retirada: "Retirada", transportadora: "Transportadora" };

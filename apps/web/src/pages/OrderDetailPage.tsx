@@ -1,35 +1,39 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { AlertCircle, ArrowLeft, CalendarDays, Check, CheckCircle2, CircleDollarSign, ClipboardCheck, Clock3, Factory, MapPin, MessageSquareWarning, PackageCheck, Phone, Truck, UserRound } from "lucide-react";
+import { AlertCircle, ArrowLeft, CalendarDays, Check, CheckCircle2, CircleDollarSign, ClipboardCheck, Clock3, Factory, MapPin, MessageSquareWarning, PackageCheck, Pencil, Phone, Truck, UserRound } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
+import { OrderFormModal } from "../components/OrderFormModal";
 import { EmptyState, ErrorBanner, Field, Loading, Modal, PageHeader, PriorityBadge, StatusBadge } from "../components/ui";
 import { api, dateTime, money, shortDate } from "../lib/api";
-import { statusLabel, type Address, type Order, type OrderStatus } from "../types";
+import { statusLabel, type Address, type Customer, type Order, type OrderStatus, type Product } from "../types";
 
 type Detail = Order & {
   subtotal: string; discount: string; createdAt: string; customerEmail: string | null; customerAddress: Address;
-  items: Array<{ id: string; quantity: string; unitPrice: string; total: string; notes: string | null; checkStatus: string; productName: string; sku: string }>;
+  items: Array<{ id: string; productId: string; quantity: string; unitPrice: string; total: string; notes: string | null; checkStatus: string; productName: string; sku: string }>;
   payments: Array<{ id: string; amount: string; receivedAmount: string; method: string; status: string; dueDate: string | null; paidAt: string | null; proofReference: string | null; notes: string | null }>;
   production: { id: string; status: string; startedAt: string | null; completedAt: string | null; assigneeName: string | null; notes: string | null } | null;
   shipping: { type: string; address: Address; deliveryWindow: string | null; carrier: string | null; driver: string | null; trackingCode: string | null; departedAt: string | null; deliveredAt: string | null; failedReason: string | null } | null;
   occurrences: Array<{ id: string; type: string; description: string; status: string; solution: string | null; createdAt: string; resolvedAt: string | null; createdByName: string }>;
   history: Array<{ id: string; fromStatus: OrderStatus | null; toStatus: OrderStatus; notes: string | null; createdAt: string; userName: string }>;
   allowedTransitions: OrderStatus[];
+  canEdit: boolean;
 };
 
 const checkLabels: Record<string, string> = { pendente: "Pendente", separado: "Separado", conferido: "Conferido", faltante: "Faltante", substituido: "Substituído", avariado: "Avariado" };
 
 export function OrderDetailPage() {
   const { id } = useParams(); const [order, setOrder] = useState<Detail | null>(null); const [error, setError] = useState(""); const [issueOpen, setIssueOpen] = useState(false);
+  const [editData, setEditData] = useState<{ customers: Customer[]; products: Product[] } | null>(null);
   async function load() { if (!id) return; try { setOrder(await api<Detail>(`/orders/${id}`)); } catch (e) { setError(e instanceof Error ? e.message : "Falha ao carregar pedido."); } }
   useEffect(() => { void load(); }, [id]);
   async function transition(status: OrderStatus) { if (!id) return; setError(""); try { await api(`/orders/${id}/transition`, { method: "POST", body: JSON.stringify({ status }) }); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível avançar."); } }
+  async function openEdit() { setError(""); try { const [customers, products] = await Promise.all([api<Customer[]>("/customers"), api<Product[]>("/products")]); setEditData({ customers, products }); } catch (e) { setError(e instanceof Error ? e.message : "Falha ao carregar dados para edição."); } }
   async function checkItem(itemId: string, status: string) { try { await api(`/order-items/${itemId}/check`, { method: "PATCH", body: JSON.stringify({ status }) }); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Falha na conferência."); } }
   if (error && !order) return <ErrorBanner message={error} />;
   if (!order) return <Loading />;
   const address = order.shipping?.address ?? order.customerAddress;
   return <>
     <Link to="/pedidos" className="back-link"><ArrowLeft size={16} /> Voltar ao quadro</Link>
-    <PageHeader eyebrow={order.number} title={order.customerName} description={`Pedido criado em ${shortDate(order.orderDate)}`} actions={<div className="detail-head-actions"><PriorityBadge priority={order.priority} /><StatusBadge status={order.status} /></div>} />
+    <PageHeader eyebrow={order.number} title={order.customerName} description={`Pedido criado em ${shortDate(order.orderDate)}`} actions={<div className="detail-head-actions">{order.canEdit && <button className="button secondary small" onClick={() => void openEdit()}><Pencil size={16} /> Alterar pedido</button>}<PriorityBadge priority={order.priority} /><StatusBadge status={order.status} /></div>} />
     {error && <ErrorBanner message={error} />}
     {order.allowedTransitions.length > 0 && <section className="next-actions"><div><span className="eyebrow">Próxima etapa</span><strong>Atualize o andamento do pedido</strong></div><div>{order.allowedTransitions.map((status) => <button key={status} className={`button ${status === "cancelado" ? "danger-outline" : "primary"}`} onClick={() => void transition(status)}>{status !== "cancelado" && <Check size={17} />}{statusLabel[status]}</button>)}</div></section>}
     <div className="detail-layout"><div className="detail-main">
@@ -37,7 +41,7 @@ export function OrderDetailPage() {
         <div className="items-table"><div className="table-head"><span>Produto</span><span>Qtd.</span><span>Unitário</span><span>Total</span><span>Conferência</span></div>{order.items.map((item) => <div className="table-row" key={item.id}><div><strong>{item.productName}</strong><small>{item.sku}</small></div><span>{Number(item.quantity)}</span><span>{money(item.unitPrice)}</span><strong>{money(item.total)}</strong><select className={`check-select check-${item.checkStatus}`} value={item.checkStatus} onChange={(e) => void checkItem(item.id, e.target.value)}>{Object.entries(checkLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>)}</div>
         <div className="totals"><div><span>Subtotal</span><strong>{money(order.subtotal)}</strong></div><div><span>Desconto</span><strong>- {money(order.discount)}</strong></div><div><span>Total</span><strong>{money(order.total)}</strong></div></div>
       </section>
-      <section className="panel"><div className="panel-header"><div><span className="eyebrow">Rastreabilidade</span><h2>Histórico</h2></div></div><div className="timeline">{order.history.map((event, index) => <div className="timeline-event" key={event.id}><div className={`timeline-dot ${index === 0 ? "active" : ""}`}><Check size={12} /></div><div><div><strong>{statusLabel[event.toStatus]}</strong><time>{dateTime(event.createdAt)}</time></div><p>{event.fromStatus ? `${statusLabel[event.fromStatus]} → ` : ""}{statusLabel[event.toStatus]}</p><small>{event.userName}{event.notes ? ` · ${event.notes}` : ""}</small></div></div>)}</div></section>
+      <section className="panel"><div className="panel-header"><div><span className="eyebrow">Rastreabilidade</span><h2>Histórico</h2></div></div><div className="timeline">{order.history.map((event, index) => <div className="timeline-event" key={event.id}><div className={`timeline-dot ${index === 0 ? "active" : ""}`}><Check size={12} /></div><div><div><strong>{statusLabel[event.toStatus]}</strong><time>{dateTime(event.createdAt)}</time></div><p>{event.fromStatus === event.toStatus ? "Dados do pedido alterados" : `${event.fromStatus ? `${statusLabel[event.fromStatus]} → ` : ""}${statusLabel[event.toStatus]}`}</p><small>{event.userName}{event.notes ? ` · ${event.notes}` : ""}</small></div></div>)}</div></section>
       <section className="panel"><div className="panel-header"><div><span className="eyebrow">Pendências</span><h2>Ocorrências</h2></div><button className="button secondary small" onClick={() => setIssueOpen(true)}><AlertCircle size={16} /> Registrar</button></div>{order.occurrences.length ? <div className="issue-list">{order.occurrences.map((issue) => <article className={issue.status === "aberta" ? "open" : "resolved"} key={issue.id}><span className="issue-symbol">{issue.status === "aberta" ? <MessageSquareWarning /> : <CheckCircle2 />}</span><div><div><strong>{issue.type.replaceAll("_", " ")}</strong><span>{issue.status}</span></div><p>{issue.description}</p><small>{issue.createdByName} · {dateTime(issue.createdAt)}</small>{issue.solution && <p className="solution"><strong>Solução:</strong> {issue.solution}</p>}</div>{issue.status === "aberta" && <button className="text-link" onClick={async () => { const solution = prompt("Como a ocorrência foi solucionada?"); if (solution) { await api(`/occurrences/${issue.id}/resolve`, { method: "PATCH", body: JSON.stringify({ solution }) }); await load(); } }}>Resolver</button>}</article>)}</div> : <EmptyState icon={<ClipboardCheck />} title="Nenhuma ocorrência" description="Tudo certo com este pedido até aqui." />}</section>
     </div><aside className="detail-aside">
       <section className="info-card"><div className="info-card-title"><UserRound /><strong>Cliente</strong></div><h3>{order.customerName}</h3>{order.customerPhone && <span><Phone />{order.customerPhone}</span>}<span><MapPin />{formatAddress(order.customerAddress)}</span></section>
@@ -46,6 +50,7 @@ export function OrderDetailPage() {
       <section className="info-card"><div className="info-card-title"><Factory /><strong>Produção</strong></div><div className="info-pair"><span>Situação</span><strong>{order.production?.status.replaceAll("_", " ") ?? "—"}</strong></div><span><Clock3 />Início: {dateTime(order.production?.startedAt)}</span><span><PackageCheck />Conclusão: {dateTime(order.production?.completedAt)}</span></section>
       {order.shipping && <section className="info-card"><div className="info-card-title"><Truck /><strong>Expedição</strong></div><div className="info-pair"><span>Responsável</span><strong>{order.shipping.driver ?? order.shipping.carrier ?? "A definir"}</strong></div><span>Janela: {order.shipping.deliveryWindow ?? "—"}</span><span>Código: {order.shipping.trackingCode ?? "—"}</span><span>Saída: {dateTime(order.shipping.departedAt)}</span><span>Entrega: {dateTime(order.shipping.deliveredAt)}</span>{order.shipping.failedReason && <span className="danger-text">Tentativa frustrada: {order.shipping.failedReason}</span>}</section>}
     </aside></div>
+    {editData && <OrderFormModal open customers={editData.customers} products={editData.products} initial={order} onClose={() => setEditData(null)} onSaved={() => { setEditData(null); void load(); }} />}
     <OccurrenceModal open={issueOpen} orderId={order.id} onClose={() => setIssueOpen(false)} onCreated={() => { setIssueOpen(false); void load(); }} />
   </>;
 }
