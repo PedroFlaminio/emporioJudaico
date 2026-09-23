@@ -2,7 +2,7 @@ export type Role = "atendimento" | "producao" | "expedicao" | "financeiro" | "ge
 export type OrderStatus = "recebido" | "pagamento_pendente" | "pagamento_confirmado" | "em_producao" | "preparacao" | "pronto" | "expedicao" | "entregue" | "cancelado";
 export type Priority = "baixa" | "normal" | "alta" | "urgente";
 
-export type User = { id: string; name: string; email: string; role: Role; department: string | null };
+export type User = { id: string; name: string; email: string; role: Role; department: string | null; active?: boolean };
 export type Customer = { id: string; name: string; document: string | null; phone: string | null; email: string | null; address: Address; notes?: string | null; active: boolean };
 export type Address = { street?: string; number?: string; complement?: string; district?: string; city?: string; state?: string; zipCode?: string };
 export type Product = { id: string; sku: string; name: string; description: string | null; price: string; productionMinutes: number; active: boolean; categoryId: string | null; categoryName: string | null };

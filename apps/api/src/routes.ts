@@ -19,7 +19,7 @@ import {
   type UserRole,
 } from "./db/schema";
 import { can, createSession, deleteSession } from "./lib/auth";
-import { apiError, forbidden, parseBody, requireUser } from "./lib/http";
+import { apiError, forbidden, isForeignKeyViolation, parseBody, requireUser } from "./lib/http";
 import { config } from "./config";
 
 const id = z.string().uuid();
@@ -53,6 +53,14 @@ const productSchema = z.object({
   productionMinutes: z.coerce.number().int().nonnegative().default(0),
   active: z.boolean().optional(),
 });
+
+const categorySchema = z.object({
+  name: z.string().trim().min(2),
+  active: z.boolean().optional(),
+});
+
+const roleSchema = z.enum(["atendimento", "producao", "expedicao", "financeiro", "gestor", "administrador"]);
+const userSelection = { id: users.id, name: users.name, email: users.email, role: users.role, department: users.department, active: users.active };
 
 const orderSchema = z.object({
   customerId: id,
@@ -215,6 +223,18 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
       return updated;
     } catch (error) { return apiError(error, set); }
   })
+  .delete("/customers/:id", async ({ headers, params, set }) => {
+    const user = await requireUser(headers.authorization, set);
+    if (!user || !can(user, ["atendimento", "gestor"])) return forbidden(set, user);
+    try {
+      const [deleted] = await db.delete(customers).where(eq(customers.id, params.id)).returning({ id: customers.id });
+      if (!deleted) { set.status = 404; return { message: "Cliente não encontrado." }; }
+      return { success: true };
+    } catch (error) {
+      if (isForeignKeyViolation(error)) { set.status = 409; return { message: "Este cliente possui pedidos e não pode ser excluído. Edite o cadastro e marque-o como inativo." }; }
+      return apiError(error, set);
+    }
+  })
   .get("/categories", async ({ headers, set }) => {
     if (!await requireUser(headers.authorization, set)) return forbidden(set);
     return db.select().from(categories).orderBy(asc(categories.name));
@@ -223,10 +243,30 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
     const user = await requireUser(headers.authorization, set);
     if (!user || !can(user, ["gestor"])) return forbidden(set, user);
     try {
-      const input = parseBody(z.object({ name: z.string().trim().min(2) }), body);
+      const input = parseBody(categorySchema, body);
       const [created] = await db.insert(categories).values(input).returning();
       set.status = 201;
       return created;
+    } catch (error) { return apiError(error, set); }
+  })
+  .put("/categories/:id", async ({ headers, params, body, set }) => {
+    const user = await requireUser(headers.authorization, set);
+    if (!user || !can(user, ["gestor"])) return forbidden(set, user);
+    try {
+      const input = parseBody(categorySchema, body);
+      const [updated] = await db.update(categories).set({ ...input, updatedAt: new Date() }).where(eq(categories.id, params.id)).returning();
+      if (!updated) { set.status = 404; return { message: "Categoria não encontrada." }; }
+      return updated;
+    } catch (error) { return apiError(error, set); }
+  })
+  .delete("/categories/:id", async ({ headers, params, set }) => {
+    const user = await requireUser(headers.authorization, set);
+    if (!user || !can(user, ["gestor"])) return forbidden(set, user);
+    try {
+      // Produtos da categoria ficam "Sem categoria" (on delete set null).
+      const [deleted] = await db.delete(categories).where(eq(categories.id, params.id)).returning({ id: categories.id });
+      if (!deleted) { set.status = 404; return { message: "Categoria não encontrada." }; }
+      return { success: true };
     } catch (error) { return apiError(error, set); }
   })
   .get("/products", async ({ headers, query, set }) => {
@@ -259,6 +299,18 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
       if (!updated) { set.status = 404; return { message: "Produto não encontrado." }; }
       return updated;
     } catch (error) { return apiError(error, set); }
+  })
+  .delete("/products/:id", async ({ headers, params, set }) => {
+    const user = await requireUser(headers.authorization, set);
+    if (!user || !can(user, ["atendimento", "gestor"])) return forbidden(set, user);
+    try {
+      const [deleted] = await db.delete(products).where(eq(products.id, params.id)).returning({ id: products.id });
+      if (!deleted) { set.status = 404; return { message: "Produto não encontrado." }; }
+      return { success: true };
+    } catch (error) {
+      if (isForeignKeyViolation(error)) { set.status = 409; return { message: "Este produto já foi usado em pedidos e não pode ser excluído. Edite o cadastro e marque-o como inativo." }; }
+      return apiError(error, set);
+    }
   })
   .get("/orders", async ({ headers, query, set }) => {
     if (!await requireUser(headers.authorization, set)) return forbidden(set);
@@ -470,15 +522,55 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
   .get("/users", async ({ headers, set }) => {
     const user = await requireUser(headers.authorization, set);
     if (!user || !can(user, ["gestor"])) return forbidden(set, user);
-    return db.select({ id: users.id, name: users.name, email: users.email, role: users.role, department: users.department, active: users.active }).from(users).orderBy(asc(users.name));
+    return db.select(userSelection).from(users).orderBy(asc(users.name));
   })
   .post("/users", async ({ headers, body, set }) => {
     const user = await requireUser(headers.authorization, set);
     if (!user || !can(user, ["gestor"])) return forbidden(set, user);
     try {
-      const input = parseBody(z.object({ name: z.string().min(2), email: z.string().email(), password: z.string().min(8), role: z.enum(["atendimento", "producao", "expedicao", "financeiro", "gestor", "administrador"]), department: optionalText }), body);
+      const input = parseBody(z.object({ name: z.string().min(2), email: z.string().email(), password: z.string().min(8), role: roleSchema, department: optionalText }), body);
       const [created] = await db.insert(users).values({ ...input, email: input.email.toLowerCase(), passwordHash: await Bun.password.hash(input.password) }).returning({ id: users.id, name: users.name, email: users.email, role: users.role });
       set.status = 201;
       return created;
     } catch (error) { return apiError(error, set); }
+  })
+  .put("/users/:id", async ({ headers, params, body, set }) => {
+    const user = await requireUser(headers.authorization, set);
+    if (!user || !can(user, ["gestor"])) return forbidden(set, user);
+    try {
+      const input = parseBody(z.object({
+        name: z.string().min(2),
+        email: z.string().email(),
+        password: z.string().min(8).optional().or(z.literal("")),
+        role: roleSchema,
+        department: optionalText,
+        active: z.boolean().optional(),
+      }), body);
+      if (params.id === user.id && (input.active === false || input.role !== user.role)) {
+        set.status = 422;
+        return { message: "Você não pode inativar nem alterar o perfil do seu próprio usuário." };
+      }
+      const { password, ...fields } = input;
+      const [updated] = await db.update(users).set({
+        ...fields,
+        email: input.email.toLowerCase(),
+        ...(password ? { passwordHash: await Bun.password.hash(password) } : {}),
+        updatedAt: new Date(),
+      }).where(eq(users.id, params.id)).returning(userSelection);
+      if (!updated) { set.status = 404; return { message: "Usuário não encontrado." }; }
+      return updated;
+    } catch (error) { return apiError(error, set); }
+  })
+  .delete("/users/:id", async ({ headers, params, set }) => {
+    const user = await requireUser(headers.authorization, set);
+    if (!user || !can(user, ["gestor"])) return forbidden(set, user);
+    if (params.id === user.id) { set.status = 422; return { message: "Você não pode excluir o seu próprio usuário." }; }
+    try {
+      const [deleted] = await db.delete(users).where(eq(users.id, params.id)).returning({ id: users.id });
+      if (!deleted) { set.status = 404; return { message: "Usuário não encontrado." }; }
+      return { success: true };
+    } catch (error) {
+      if (isForeignKeyViolation(error)) { set.status = 409; return { message: "Este usuário possui histórico de operações e não pode ser excluído. Edite o cadastro e marque-o como inativo." }; }
+      return apiError(error, set);
+    }
   });

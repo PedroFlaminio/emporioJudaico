@@ -113,6 +113,35 @@ describe("fluxo operacional da API", () => {
     expect(shippingResponse.status).toBe(200);
     expect((await callAs(expedicaoToken, `/api/orders/${orderId}/transition`, { method: "POST", body: JSON.stringify({ status: "expedicao" }) })).status).toBe(200);
   });
+
+  it("edita e exclui cadastros, bloqueando exclusão de registros vinculados", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const json = async <T>(response: Response) => await response.json() as T;
+
+    const category = await json<{ id: string }>(await call("/api/categories", { method: "POST", body: JSON.stringify({ name: `Categoria ${suffix}` }) }));
+    const renamed = await call(`/api/categories/${category.id}`, { method: "PUT", body: JSON.stringify({ name: `Renomeada ${suffix}` }) });
+    expect(renamed.status).toBe(200);
+    expect((await json<{ name: string }>(renamed)).name).toBe(`Renomeada ${suffix}`);
+
+    const product = await json<{ id: string }>(await call("/api/products", { method: "POST", body: JSON.stringify({ name: "Produto temporário", sku: `TMP-${suffix}`, price: 10, categoryId: category.id }) }));
+    const productUpdate = await call(`/api/products/${product.id}`, { method: "PUT", body: JSON.stringify({ name: "Produto editado", sku: `TMP-${suffix}`, price: 12.5, categoryId: category.id, active: false }) });
+    expect(productUpdate.status).toBe(200);
+    expect((await call(`/api/categories/${category.id}`, { method: "DELETE" })).status).toBe(200);
+    expect((await call(`/api/products/${product.id}`, { method: "DELETE" })).status).toBe(200);
+    expect((await call(`/api/products/${product.id}`, { method: "DELETE" })).status).toBe(404);
+
+    const linkedCustomer = await call(`/api/customers/${customerId}`, { method: "DELETE" });
+    expect(linkedCustomer.status).toBe(409);
+
+    const created = await json<{ id: string }>(await call("/api/users", { method: "POST", body: JSON.stringify({ name: "Usuário temporário", email: `tmp-${suffix}@emporio.local`, password: "senha-temporaria", role: "atendimento" }) }));
+    const userUpdate = await call(`/api/users/${created.id}`, { method: "PUT", body: JSON.stringify({ name: "Usuário editado", email: `tmp-${suffix}@emporio.local`, password: "", role: "producao", active: false }) });
+    expect(userUpdate.status).toBe(200);
+    expect(await json<{ role: string; active: boolean }>(userUpdate)).toMatchObject({ role: "producao", active: false });
+    expect((await call(`/api/users/${created.id}`, { method: "DELETE" })).status).toBe(200);
+
+    const me = await json<{ id: string }>(await call("/api/auth/me"));
+    expect((await call(`/api/users/${me.id}`, { method: "DELETE" })).status).toBe(422);
+  });
 });
 
 afterAll(async () => {
