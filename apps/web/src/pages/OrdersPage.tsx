@@ -8,7 +8,6 @@ import { api, money, shortDate } from "../lib/api";
 import { statusLabel, type Customer, type Order, type OrderStatus, type Product, type Role } from "../types";
 
 // Mesma regra da API: alterações permitidas até a etapa Pronto.
-const editableStatuses: OrderStatus[] = ["recebido", "pagamento_pendente", "pagamento_confirmado", "em_producao", "preparacao", "pronto"];
 
 const columns: Array<{ key: string; title: string; statuses: OrderStatus[]; dropStatus: OrderStatus }> = [
   { key: "entrada", title: "Entrada & pagamento", statuses: ["recebido", "pagamento_pendente", "pagamento_confirmado"], dropStatus: "pagamento_confirmado" },
@@ -121,7 +120,7 @@ export function OrdersPage() {
             {feedback.allowed ? <CheckCircle2 size={17} /> : <Ban size={17} />}<span>{feedback.message}</span>
           </div>}
           {columnOrders.map((order) => <article className={`order-card ${dragId === order.id ? "dragging" : ""}`} key={order.id} draggable={!!user} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setError(""); setDragId(order.id); }} onDragEnd={endDrag}>
-          <div className="order-card-top"><span>{order.number}</span><span className="order-card-tools">{canCreate && editableStatuses.includes(order.status) && <button type="button" className="icon-button order-card-edit" draggable={false} title="Alterar pedido" aria-label={`Alterar pedido ${order.number}`} onClick={() => void openEdit(order.id)}><Pencil size={13} /></button>}<GripVertical size={16} /></span></div><Link to={`/pedidos/${order.id}`}><h3>{order.customerName}</h3></Link><StatusBadge status={order.status} />
+          <div className="order-card-top"><span>{order.number}</span><span className="order-card-tools">{canCreate && <button type="button" className="icon-button order-card-edit" draggable={false} title="Alterar pedido" aria-label={`Alterar pedido ${order.number}`} onClick={() => void openEdit(order.id)}><Pencil size={13} /></button>}<GripVertical size={16} /></span></div><Link to={`/pedidos/${order.id}`}><h3>{order.customerName}</h3></Link><StatusBadge status={order.status} />
           <div className="order-meta"><span><CalendarDays size={15} />{shortDate(order.promisedDate)}</span><strong>{money(order.total)}</strong></div><div className="order-card-footer"><PriorityBadge priority={order.priority} /><span>{order.deliveryType}</span></div>
         </article>)}{!columnOrders.length && <div className="kanban-empty">Solte um pedido aqui</div>}</div>
       </section>;

@@ -100,8 +100,7 @@ const orderUpdateSchema = orderSchema.omit({ payment: true, items: true }).exten
   })).min(1),
 });
 
-// O pedido pode ser alterado em qualquer etapa anterior à expedição.
-const editableStatuses: OrderStatus[] = ["recebido", "pagamento_pendente", "pagamento_confirmado", "em_producao", "preparacao", "pronto"];
+// O pedido pode ser alterado em qualquer etapa, inclusive na expedição.
 const orderEditRoles: UserRole[] = ["atendimento", "gestor"];
 
 const flow: Record<OrderStatus, OrderStatus[]> = {
@@ -439,7 +438,7 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
     return {
       ...order, items, payments: paymentRows, production: production[0] ?? null, shipping: shipping[0] ?? null, occurrences: issueRows, history,
       allowedTransitions: allowedTransitionsFor(user, order.status),
-      canEdit: editableStatuses.includes(order.status) && can(user, orderEditRoles),
+      canEdit: can(user, orderEditRoles),
     };
   })
   .put("/orders/:id", async ({ headers, params, body, set }) => {
@@ -449,10 +448,6 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
       const input = parseBody(orderUpdateSchema, body);
       const [current] = await db.select().from(orders).where(eq(orders.id, params.id)).limit(1);
       if (!current) { set.status = 404; return { message: "Pedido não encontrado." }; }
-      if (!editableStatuses.includes(current.status)) {
-        set.status = 409;
-        return { message: `O pedido está em ${orderStatusLabels[current.status]} e não pode mais ser alterado. Alterações são permitidas apenas até a etapa Pronto.` };
-      }
       const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       const total = Math.max(0, subtotal - input.discount);
       const result = await db.transaction(async (tx) => {

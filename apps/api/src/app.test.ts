@@ -98,7 +98,7 @@ describe("fluxo operacional da API", () => {
     expect(allowed.status).toBe(200);
   });
 
-  it("permite alterar o pedido antes da expedição", async () => {
+  it("permite alterar o pedido em qualquer etapa", async () => {
     const detail = await (await call(`/api/orders/${orderId}`)).json() as { status: string; canEdit: boolean; items: Array<{ id: string; productId: string; unitPrice: string; checkStatus: string }> };
     expect(detail.status).toBe("preparacao");
     expect(detail.canEdit).toBe(true);
@@ -142,10 +142,11 @@ describe("fluxo operacional da API", () => {
     expect(shippingResponse.status).toBe(200);
     expect((await callAs(expedicaoToken, `/api/orders/${orderId}/transition`, { method: "POST", body: JSON.stringify({ status: "expedicao" }) })).status).toBe(200);
 
-    const detail = await (await call(`/api/orders/${orderId}`)).json() as { canEdit: boolean; items: Array<{ id: string; productId: string }> };
-    expect(detail.canEdit).toBe(false);
-    const blocked = await call(`/api/orders/${orderId}`, { method: "PUT", body: JSON.stringify({ customerId, deliveryType: "retirada", items: [{ id: detail.items[0]!.id, productId: detail.items[0]!.productId, quantity: 1, unitPrice: 1 }] }) });
-    expect(blocked.status).toBe(409);
+    const detail = await (await call(`/api/orders/${orderId}`)).json() as { status: string; canEdit: boolean; items: Array<{ id: string; productId: string }>; shipping: { address: Record<string, string> } };
+    expect(detail.canEdit).toBe(true);
+    const editedInShipping = await call(`/api/orders/${orderId}`, { method: "PUT", body: JSON.stringify({ customerId, deliveryType: "entrega", shippingAddress: detail.shipping.address, items: [{ id: detail.items[0]!.id, productId: detail.items[0]!.productId, quantity: 1, unitPrice: 1 }] }) });
+    expect(editedInShipping.status).toBe(200);
+    expect((await (await call(`/api/orders/${orderId}`)).json() as { status: string }).status).toBe("expedicao");
 
     const beforeDelivery = Date.now();
     expect((await callAs(expedicaoToken, `/api/orders/${orderId}/transition`, { method: "POST", body: JSON.stringify({ status: "entregue" }) })).status).toBe(200);
