@@ -18,14 +18,21 @@ export type OrderFormInitial = {
   shipping: { address: Address; deliveryWindow: string | null; carrier: string | null; driver: string | null; trackingCode: string | null } | null;
 };
 
-export function OrderFormModal({ open, customers, products, initial, onClose, onSaved }: { open: boolean; customers: Customer[]; products: Product[]; initial?: OrderFormInitial; onClose: () => void; onSaved: () => void }) {
+type OrderFormModalProps = { open: boolean; customers: Customer[]; products: Product[]; initial?: OrderFormInitial; onClose: () => void; onSaved: () => void };
+
+// Monta o formulário só enquanto está aberto, para cada abertura começar com o estado limpo.
+export function OrderFormModal(props: OrderFormModalProps) {
+  return props.open ? <OrderForm {...props} /> : null;
+}
+
+function OrderForm({ open, customers, products, initial, onClose, onSaved }: OrderFormModalProps) {
   const editing = !!initial;
   const [customerId, setCustomerId] = useState(initial?.customerId ?? "");
   const [promisedDate, setPromisedDate] = useState(initial?.promisedDate?.slice(0, 10) ?? "");
   const [priority, setPriority] = useState<string>(initial?.priority ?? "normal");
   const [deliveryType, setDeliveryType] = useState<string>(initial?.deliveryType ?? "retirada");
-  const [discount, setDiscount] = useState(Number(initial?.discount ?? 0));
-  // Texto do percentual enquanto o usuário digita; fora disso o percentual é derivado do desconto.
+  const [discountAmount, setDiscountAmount] = useState(Number(initial?.discount ?? 0));
+  // Percentual digitado pelo usuário; quando preenchido, o desconto é derivado dele sem arredondar.
   const [discountPercentInput, setDiscountPercentInput] = useState<string | null>(null);
   const [method, setMethod] = useState("pix");
   const [paymentStatus, setPaymentStatus] = useState("pendente");
@@ -41,9 +48,10 @@ export function OrderFormModal({ open, customers, products, initial, onClose, on
   const [items, setItems] = useState<DraftItem[]>(initial?.items.map((item) => ({ id: item.id, productId: item.productId, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), notes: item.notes })) ?? [{ productId: "", quantity: 1, unitPrice: 0 }]);
   const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const discount = discountPercentInput !== null ? subtotal * Number(discountPercentInput) / 100 : discountAmount;
   const total = Math.max(0, subtotal - discount);
   const discountPercent = subtotal > 0 ? Math.round((discount / subtotal) * 10000) / 100 : 0;
-  function changeDiscountPercent(value: string) { setDiscountPercentInput(value); setDiscount(Math.round(subtotal * Number(value)) / 100); }
+  function changeDiscountAmount(value: number) { setDiscountPercentInput(null); setDiscountAmount(value); }
   // Na edição, produtos e clientes já vinculados continuam selecionáveis mesmo se inativos.
   const selectableProducts = products.filter((p) => p.active || items.some((item) => item.productId === p.id));
   const selectableCustomers = customers.filter((c) => c.active || c.id === initial?.customerId);
@@ -54,7 +62,7 @@ export function OrderFormModal({ open, customers, products, initial, onClose, on
   async function submit(event: FormEvent) {
     event.preventDefault(); setError(""); setSaving(true);
     const common = {
-      customerId, promisedDate: promisedDate || null, priority, deliveryType, discount, notes, items,
+      customerId, promisedDate: promisedDate || null, priority, deliveryType, discount: Math.round(discount * 100) / 100, notes, items,
       shippingAddress: deliveryType === "retirada" ? {} : shippingAddress,
       deliveryWindow: deliveryWindow || null, carrier: carrier || null, driver: driver || null, trackingCode: trackingCode || null,
     };
@@ -69,8 +77,8 @@ export function OrderFormModal({ open, customers, products, initial, onClose, on
     finally { setSaving(false); }
   }
   const discountField = <div className="discount-fields">
-    <Field label="Desconto (%)"><input type="number" min="0" max="100" step="0.01" value={discountPercentInput ?? discountPercent} onChange={(e) => changeDiscountPercent(e.target.value)} onBlur={() => setDiscountPercentInput(null)} disabled={subtotal <= 0} /></Field>
-    <Field label="Desconto"><MoneyInput value={discount} onChange={setDiscount} /></Field>
+    <Field label="Desconto (%)"><input type="number" min="0" max="100" step="0.01" value={discountPercentInput ?? discountPercent} onChange={(e) => setDiscountPercentInput(e.target.value)} disabled={subtotal <= 0} /></Field>
+    <Field label="Desconto"><MoneyInput value={discount} onChange={changeDiscountAmount} /></Field>
   </div>;
   return <Modal open={open} title={editing ? "Alterar pedido" : "Novo pedido"} onClose={onClose} wide><form onSubmit={submit} className="modal-body order-form">
     {error && <ErrorBanner message={error} />}
@@ -99,7 +107,7 @@ export function OrderFormModal({ open, customers, products, initial, onClose, on
     </div>
     {editing
       ? <div className="form-section"><div className="form-section-title"><span>3</span><div><strong>Valores</strong><small>A cobrança em aberto é ajustada ao novo total</small></div></div><div className="form-grid three">{discountField}</div></div>
-      : <div className="form-section"><div className="form-section-title"><span>3</span><div><strong>Pagamento</strong><small>Condição inicial da cobrança</small></div></div><div className="form-grid three"><Field label="Forma"><select value={method} onChange={(e) => setMethod(e.target.value)}><option value="pix">Pix</option><option value="cartao">Cartão</option><option value="boleto">Boleto</option><option value="dinheiro">Dinheiro</option></select></Field><Field label="Situação"><select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}><option value="pendente">Pendente</option><option value="parcial">Parcial</option><option value="pago">Pago</option></select></Field>{discountField}{paymentStatus === "parcial" && <Field label="Valor recebido"><input type="number" min="0.01" max={Math.max(total - 0.01, 0.01)} step="0.01" value={receivedAmount} onChange={(e) => setReceivedAmount(Number(e.target.value))} required /></Field>}<Field label="Comprovante / referência"><input value={proofReference} onChange={(e) => setProofReference(e.target.value)} /></Field><Field label="Observações do pagamento"><input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} /></Field></div></div>}
+      : <div className="form-section"><div className="form-section-title"><span>3</span><div><strong>Pagamento</strong><small>Condição inicial da cobrança</small></div></div><div className="form-grid three"><Field label="Forma"><select value={method} onChange={(e) => setMethod(e.target.value)}><option value="pix">Pix</option><option value="cartao">Cartão</option><option value="boleto">Boleto</option><option value="dinheiro">Dinheiro</option></select></Field><Field label="Situação"><select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}><option value="pendente">Pendente</option><option value="parcial">Parcial</option><option value="pago">Pago</option></select></Field>{discountField}{paymentStatus === "parcial" && <Field label="Valor recebido"><MoneyInput value={receivedAmount} onChange={setReceivedAmount} required /></Field>}<Field label="Comprovante / referência"><input value={proofReference} onChange={(e) => setProofReference(e.target.value)} /></Field><Field label="Observações do pagamento"><input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} /></Field></div></div>}
     <div className="order-summary"><div><span>Subtotal</span><strong>{money(subtotal)}</strong></div><div><span>Desconto</span><strong>- {money(discount)}</strong></div><div className="summary-total"><span>Total</span><strong>{money(total)}</strong></div></div>
     <div className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>Cancelar</button><button className="button primary" disabled={saving}>{editing ? <Save size={18} /> : <ShoppingBasket size={18} />} {saving ? "Salvando..." : editing ? "Salvar alterações" : "Criar pedido"}</button></div>
   </form></Modal>;

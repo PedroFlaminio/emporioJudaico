@@ -52,7 +52,7 @@ export function OrdersPage() {
   }
   useEffect(() => { void load(); }, []);
   const filtered = useMemo(() => orders.filter((order) => `${order.number} ${order.customerName}`.toLowerCase().includes(search.toLowerCase())), [orders, search]);
-  const canCreate = !!user && ["atendimento", "gestor", "administrador"].includes(user.role);
+  const canCreate = !!user && ["atendimento", "financeiro", "gestor", "administrador"].includes(user.role);
   const transitionRoles: Partial<Record<OrderStatus, Role[]>> = {
     pagamento_confirmado: ["atendimento", "financeiro", "gestor", "administrador"],
     em_producao: ["producao", "gestor", "administrador"],

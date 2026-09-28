@@ -373,7 +373,7 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
   })
   .post("/orders", async ({ headers, body, set }) => {
     const user = await requireUser(headers.authorization, set);
-    if (!user || !can(user, ["atendimento", "gestor"])) return forbidden(set, user);
+    if (!user || !can(user, ["atendimento", "financeiro", "gestor"])) return forbidden(set, user);
     try {
       const input = parseBody(orderSchema, body);
       const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);

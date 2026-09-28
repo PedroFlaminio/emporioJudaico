@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:17-alpine
+    restart: always
     environment:
       POSTGRES_DB: emporio
       POSTGRES_USER: emporio

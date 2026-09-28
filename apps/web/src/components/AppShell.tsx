@@ -8,9 +8,9 @@ import logoUrl from "../../assets/logo.png";
 const nav: Array<{ to: string; label: string; icon: typeof LayoutDashboard; end?: boolean; roles?: Role[] }> = [
   { to: "/", label: "Painel", icon: LayoutDashboard, end: true },
   { to: "/pedidos", label: "Pedidos", icon: ClipboardList },
+  { to: "/financeiro", label: "Financeiro", icon: ReceiptText, roles: ["financeiro", "gestor", "administrador"] },
   { to: "/producao", label: "Produção", icon: Factory, roles: ["producao", "gestor", "administrador"] },
   { to: "/preparacao", label: "Preparação", icon: PackageCheck, roles: ["producao", "expedicao", "gestor", "administrador"] },
-  { to: "/financeiro", label: "Financeiro", icon: ReceiptText, roles: ["financeiro", "gestor", "administrador"] },
   { to: "/expedicao", label: "Expedição", icon: Truck, roles: ["expedicao", "gestor", "administrador"] },
   { to: "/cadastros", label: "Cadastros", icon: Settings2, roles: ["atendimento", "gestor", "administrador"] },
 ];

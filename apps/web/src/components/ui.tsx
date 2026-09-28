@@ -44,9 +44,12 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 }
 
 // Entrada financeira: os dígitos preenchem a partir dos centavos (ex.: 1, 12, 123 → 0,01 / 0,12 / 1,23).
+// Máscara que preenche da direita para a esquerda: o cursor fica sempre no final.
+function caretToEnd(input: HTMLInputElement) { requestAnimationFrame(() => { const end = input.value.length; input.setSelectionRange(end, end); }); }
+
 export function MoneyInput({ value, onChange, disabled, required }: { value: number; onChange: (value: number) => void; disabled?: boolean; required?: boolean }) {
   const text = value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return <div className="money-input"><span>R$</span><input inputMode="numeric" value={text} disabled={disabled} required={required} onChange={(e) => onChange(Number(e.target.value.replace(/\D/g, "").slice(-12) || 0) / 100)} /></div>;
+  return <div className="money-input"><span>R$</span><input inputMode="numeric" value={text} disabled={disabled} required={required} onFocus={(e) => caretToEnd(e.currentTarget)} onClick={(e) => caretToEnd(e.currentTarget)} onKeyUp={(e) => caretToEnd(e.currentTarget)} onChange={(e) => { onChange(Number(e.target.value.replace(/\D/g, "").slice(-12) || 0) / 100); caretToEnd(e.target); }} /></div>;
 }
 
 export function ErrorBanner({ message }: { message: string }) {
