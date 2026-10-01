@@ -585,6 +585,13 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
       .from(productionJobs).innerJoin(orders, eq(productionJobs.orderId, orders.id)).innerJoin(customers, eq(orders.customerId, customers.id)).leftJoin(users, eq(productionJobs.assigneeId, users.id))
       .where(inArray(orders.status, ["pagamento_confirmado", "em_producao", "preparacao", "pronto"])).orderBy(asc(orders.promisedDate));
   })
+  .get("/production/items", async ({ headers, set }) => {
+    const user = await requireUser(headers.authorization, set);
+    if (!user || !can(user, ["producao", "gestor"])) return forbidden(set, user);
+    return db.select({ id: orderItems.id, quantity: orderItems.quantity, notes: orderItems.notes, productId: products.id, productName: products.name, sku: products.sku, orderId: orders.id, orderNumber: orders.number, orderStatus: orders.status, priority: orders.priority, orderDate: orders.orderDate, promisedDate: orders.promisedDate, customerName: customers.name, jobStatus: productionJobs.status })
+      .from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.id)).innerJoin(products, eq(orderItems.productId, products.id)).innerJoin(customers, eq(orders.customerId, customers.id)).innerJoin(productionJobs, eq(productionJobs.orderId, orders.id))
+      .where(inArray(orders.status, ["pagamento_confirmado", "em_producao", "preparacao", "pronto"])).orderBy(asc(orders.promisedDate), asc(orders.number), asc(products.name));
+  })
   .patch("/production/:id", async ({ headers, params, body, set }) => {
     const user = await requireUser(headers.authorization, set);
     if (!user || !can(user, ["producao", "gestor"])) return forbidden(set, user);

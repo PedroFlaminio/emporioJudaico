@@ -1,5 +1,5 @@
-import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { ChevronDown, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { priorityLabel, statusLabel, type OrderStatus, type Priority } from "../types";
 
 export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode }) {
@@ -54,4 +54,64 @@ export function MoneyInput({ value, onChange, disabled, required }: { value: num
 
 export function ErrorBanner({ message }: { message: string }) {
   return <div className="error-banner" role="alert">{message}</div>;
+}
+
+// `search` define o texto usado no filtro; quando ausente, busca pelo próprio label.
+export type SearchOption = { value: string; label: string; search?: string };
+
+const normalize = (text: string) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+// Select com busca: digita para filtrar, setas/Enter para escolher. A lista é posicionada como fixed para não ser cortada pelo modal.
+export function SearchSelect({ value, options, onChange, placeholder = "Buscar...", required }: { value: string; options: SearchOption[]; onChange: (value: string) => void; placeholder?: string; required?: boolean }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const [position, setPosition] = useState<CSSProperties>({});
+  const selected = options.find((option) => option.value === value);
+  const terms = normalize(query).split(/\s+/).filter(Boolean);
+  const filtered = terms.length ? options.filter((option) => { const text = normalize(option.search ?? option.label); return terms.every((term) => text.includes(term)); }) : options;
+
+  useEffect(() => { inputRef.current?.setCustomValidity(required && !value ? "Selecione uma opção da lista." : ""); }, [required, value]);
+  useLayoutEffect(() => {
+    if (!open) return;
+    function place() {
+      const rect = inputRef.current?.getBoundingClientRect(); if (!rect) return;
+      const below = window.innerHeight - rect.bottom; const maxHeight = 260;
+      const up = below < Math.min(maxHeight, 160) && rect.top > below;
+      setPosition({ left: rect.left, width: rect.width, maxHeight: Math.min(maxHeight, (up ? rect.top : below) - 12), ...(up ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }) });
+    }
+    place();
+    window.addEventListener("resize", place); window.addEventListener("scroll", place, true);
+    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
+  }, [open]);
+  useEffect(() => { listRef.current?.children[active]?.scrollIntoView({ block: "nearest" }); }, [active]);
+
+  function openList() { setOpen(true); setQuery(""); setActive(Math.max(0, options.findIndex((option) => option.value === value))); }
+  function choose(option: SearchOption) { onChange(option.value); setOpen(false); setQuery(""); }
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) return openList();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      setActive((index) => Math.min(Math.max(index + step, 0), filtered.length - 1));
+    } else if (event.key === "Enter" && open) {
+      event.preventDefault();
+      if (filtered[active]) choose(filtered[active]);
+    } else if (event.key === "Escape" && open) {
+      event.preventDefault(); event.stopPropagation(); setOpen(false);
+    }
+  }
+
+  return <div className={`search-select ${open ? "open" : ""}`}>
+    <input ref={inputRef} value={open ? query : selected?.label ?? ""} placeholder={open && selected ? selected.label : placeholder} role="combobox" aria-expanded={open} aria-autocomplete="list" autoComplete="off"
+      onFocus={openList} onClick={() => !open && openList()} onBlur={() => setOpen(false)} onKeyDown={onKeyDown}
+      onChange={(event) => { setQuery(event.target.value); setActive(0); if (!open) setOpen(true); }} />
+    <ChevronDown size={16} className="search-select-icon" />
+    {open && <ul ref={listRef} className="search-select-list" role="listbox" style={position} onMouseDown={(event) => event.preventDefault()}>
+      {filtered.length ? filtered.map((option, index) => <li key={option.value} role="option" aria-selected={option.value === value} className={`${index === active ? "active" : ""} ${option.value === value ? "selected" : ""}`} onMouseEnter={() => setActive(index)} onClick={(event) => { event.preventDefault(); choose(option); }}>
+        {option.label}</li>) : <li className="search-select-empty">Nenhum resultado</li>}
+    </ul>}
+  </div>;
 }

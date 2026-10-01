@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Plus, Save, ShoppingBasket, Trash2 } from "lucide-react";
-import { ErrorBanner, Field, Modal, MoneyInput } from "./ui";
+import { ErrorBanner, Field, Modal, MoneyInput, SearchSelect, type SearchOption } from "./ui";
 import { api, money } from "../lib/api";
 import type { Address, Customer, Order, Product } from "../types";
 
@@ -55,6 +55,8 @@ function OrderForm({ open, customers, products, initial, onClose, onSaved }: Ord
   // Na edição, produtos e clientes já vinculados continuam selecionáveis mesmo se inativos.
   const selectableProducts = products.filter((p) => p.active || items.some((item) => item.productId === p.id));
   const selectableCustomers = customers.filter((c) => c.active || c.id === initial?.customerId);
+  const productOptions: SearchOption[] = selectableProducts.map((p) => ({ value: p.id, label: `${p.sku} · ${p.name}`, search: `${p.sku} ${p.name}` }));
+  const customerOptions: SearchOption[] = selectableCustomers.map((c) => ({ value: c.id, label: c.name }));
   function updateItem(index: number, values: Partial<DraftItem>) { setItems((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...values } : row)); }
   function selectProduct(index: number, productId: string) { const product = products.find((row) => row.id === productId); updateItem(index, { productId, unitPrice: Number(product?.price ?? 0) }); }
   function selectCustomer(value: string) { const customer = customers.find((row) => row.id === value); setCustomerId(value); setShippingAddress(customer?.address ?? {}); }
@@ -83,7 +85,7 @@ function OrderForm({ open, customers, products, initial, onClose, onSaved }: Ord
   return <Modal open={open} title={editing ? "Alterar pedido" : "Novo pedido"} onClose={onClose} wide><form onSubmit={submit} className="modal-body order-form">
     {error && <ErrorBanner message={error} />}
     <div className="form-section"><div className="form-section-title"><span>1</span><div><strong>Dados do pedido</strong><small>Cliente, prazo e modalidade</small></div></div><div className="form-grid three">
-      <Field label="Cliente"><select value={customerId} onChange={(e) => selectCustomer(e.target.value)} required><option value="">Selecione...</option>{selectableCustomers.map((c) => <option value={c.id} key={c.id}>{c.name}</option>)}</select></Field>
+      <Field label="Cliente"><SearchSelect value={customerId} options={customerOptions} onChange={selectCustomer} placeholder="Buscar cliente..." required /></Field>
       <Field label="Data prometida"><input type="date" value={promisedDate} onChange={(e) => setPromisedDate(e.target.value)} /></Field>
       <Field label="Prioridade"><select value={priority} onChange={(e) => setPriority(e.target.value)}><option value="baixa">Baixa</option><option value="normal">Normal</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></Field>
       <Field label="Modalidade"><select value={deliveryType} onChange={(e) => setDeliveryType(e.target.value)}><option value="retirada">Retirada</option><option value="entrega">Entrega</option><option value="transportadora">Transportadora</option></select></Field>
@@ -102,7 +104,7 @@ function OrderForm({ open, customers, products, initial, onClose, onSaved }: Ord
       <Field label="Rastreio"><input value={trackingCode} onChange={(e) => setTrackingCode(e.target.value)} /></Field>
     </div></div>}</div>
     <div className="form-section"><div className="form-section-title"><span>2</span><div><strong>Itens</strong><small>Produtos e quantidades</small></div></div>
-      <div className="items-editor">{items.map((item, index) => <div className="item-row" key={item.id ?? `new-${index}`}><Field label={index === 0 ? "Produto" : ""}><select value={item.productId} onChange={(e) => selectProduct(index, e.target.value)} required><option value="">Selecione...</option>{selectableProducts.map((p) => <option value={p.id} key={p.id}>{p.sku} · {p.name}</option>)}</select></Field><Field label={index === 0 ? "Qtd." : ""}><input type="number" min="0.001" step="0.001" value={item.quantity} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) })} /></Field><Field label={index === 0 ? "Valor unitário" : ""}><MoneyInput value={item.unitPrice} onChange={(unitPrice) => updateItem(index, { unitPrice })} /></Field><strong className="item-total">{money(item.quantity * item.unitPrice)}</strong><button type="button" className="icon-button danger" disabled={items.length === 1} onClick={() => setItems((rows) => rows.filter((_, i) => i !== index))}><Trash2 size={17} /></button></div>)}</div>
+      <div className="items-editor">{items.map((item, index) => <div className="item-row" key={item.id ?? `new-${index}`}><Field label={index === 0 ? "Produto" : ""}><SearchSelect value={item.productId} options={productOptions} onChange={(productId) => selectProduct(index, productId)} placeholder="Buscar produto..." required /></Field><Field label={index === 0 ? "Qtd." : ""}><input type="number" min="0.001" step="0.001" value={item.quantity} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) })} /></Field><Field label={index === 0 ? "Valor unitário" : ""}><MoneyInput value={item.unitPrice} onChange={(unitPrice) => updateItem(index, { unitPrice })} /></Field><strong className="item-total">{money(item.quantity * item.unitPrice)}</strong><button type="button" className="icon-button danger" disabled={items.length === 1} onClick={() => setItems((rows) => rows.filter((_, i) => i !== index))}><Trash2 size={17} /></button></div>)}</div>
       <button type="button" className="button secondary small" onClick={() => setItems((rows) => [...rows, { productId: "", quantity: 1, unitPrice: 0 }])}><Plus size={16} /> Adicionar item</button>
     </div>
     {editing
